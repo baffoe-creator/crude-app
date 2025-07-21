@@ -1,0 +1,42 @@
+### Register
+POST http://localhost:3000/api/register
+Content-Type: application/json
+
+{
+    "username": "testuser",
+    "email": "test@example.com",
+    "password": "password123"
+}
+
+### Login
+POST http://localhost:3000/api/login
+Content-Type: application/json
+
+{
+    "username": "testuser",
+    "password": "password123"
+}
+
+### Get Tasks (replace TOKEN)
+GET http://localhost:3000/api/tasks
+Authorization: Bearer TOKEN
+
+### Create Task (replace TOKEN)
+POST http://localhost:3000/api/tasks
+Authorization: Bearer TOKEN
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="title"
+
+Test Task
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="description"
+
+This is a test task
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="attachment"; filename="test.txt"
+Content-Type: text/plain
+
+< ./test.txt
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
