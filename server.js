@@ -95,8 +95,36 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Add this root route handler before your 404 handler
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Task Manager API',
+    version: '1.0.0',
+    status: 'running',
+    message: 'Welcome to the Task Manager API',
+    endpoints: {
+      health: '/health',
+      api_health: '/api/health',
+      authentication: {
+        login: '/api/auth/login',
+        register: '/api/auth/register'
+      },
+      tasks: {
+        list: 'GET /api/tasks',
+        create: 'POST /api/tasks',
+        get: 'GET /api/tasks/:id',
+        update: 'PUT /api/tasks/:id',
+        delete: 'DELETE /api/tasks/:id'
+      }
+    },
+    documentation: 'Use the endpoints above to interact with the API',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Static file serving for ephemeral uploads
 app.use('/uploads', express.static(CONFIG.UPLOAD_DIR));
+
 
 // File upload configuration optimized for Render's ephemeral storage
 const storage = multer.diskStorage({
