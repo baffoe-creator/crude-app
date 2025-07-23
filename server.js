@@ -1,11 +1,13 @@
-require('dotenv').config(); // Load environment variables first
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+console.log('Environment:', process.env.NODE_ENV);
+console.log('DB Host:', process.env.DB_HOST || 'Using Render DB URL')// Load environment variables first
 const express = require('express');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs').promises;
+ const fs = require('fs').promises;
 const fsSync = require('fs');
 const helmet = require('helmet');
 const cors = require('cors');
