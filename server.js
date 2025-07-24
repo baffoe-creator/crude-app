@@ -85,6 +85,10 @@ app.use(['/api/auth/login', '/api/auth/register'], authLimiter);
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Static file serving for ephemeral uploads
+app.use('/uploads', express.static(CONFIG.UPLOAD_DIR));
+
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Render-required health check endpoint (must be at root level)
 app.get('/health', (req, res) => {
@@ -96,7 +100,7 @@ app.get('/health', (req, res) => {
 });
 
 // Add this root route handler before your 404 handler
-app.get('/', (req, res) => {
+app.get('/api', (req, res) => {
   res.json({
     name: 'Task Manager API',
     version: '1.0.0',
@@ -122,9 +126,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Static file serving for ephemeral uploads
-app.use('/uploads', express.static(CONFIG.UPLOAD_DIR));
-
+ 
 
 // File upload configuration optimized for Render's ephemeral storage
 const storage = multer.diskStorage({
@@ -835,6 +837,10 @@ app.get('/api/health', async (req, res) => {
       uptime: process.uptime()
     });
   }
+});
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Global error handler
