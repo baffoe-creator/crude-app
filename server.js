@@ -12,7 +12,7 @@ const fsSync = require('fs');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-
+const { pathToRegexp } = require('path-to-regexp');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -839,7 +839,11 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-app.get('*', (req, res) => {
+app.get('*', (req, res, next) => {
+  // Skip API routes
+  if (req.path.startsWith('/api') || req.path.startsWith('/health')) {
+    return next();
+  }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
