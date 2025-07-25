@@ -55,7 +55,7 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000'],
+  origin: process.env.FRONTEND_URL || ['http://localhost:3000', 'http://localhost:3001'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -86,11 +86,7 @@ app.use(['/api/auth/login', '/api/auth/register'], authLimiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Static file serving for ephemeral uploads
-app.use('/uploads', express.static(CONFIG.UPLOAD_DIR));
-
-app.use(express.static(path.join(__dirname, 'public')));
- 
+// Render-required health check endpoint (must be at root level)
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'healthy',
@@ -99,7 +95,7 @@ app.get('/health', (req, res) => {
   });
 });
 
- 
+// Add this root route handler before your 404 handler
 app.get('/', (req, res) => {
   res.json({
     name: 'Task Manager API',
@@ -126,10 +122,10 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
- 
+// Static file serving for ephemeral uploads
+app.use('/uploads', express.static(CONFIG.UPLOAD_DIR));
+
+app.use(express.static(path.join(__dirname, 'public')));
 
 // File upload configuration optimized for Render's ephemeral storage
 const storage = multer.diskStorage({
