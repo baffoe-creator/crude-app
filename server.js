@@ -1,13 +1,14 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 console.log('Environment:', process.env.NODE_ENV);
-console.log('DB Host:', process.env.DB_HOST || 'Using Render DB URL')// Load environment variables first
+console.log('DB Host:', process.env.DB_HOST || 'Using Render DB URL');
+
 const express = require('express');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
- const fs = require('fs').promises;
+const fs = require('fs').promises;
 const fsSync = require('fs');
 const helmet = require('helmet');
 const cors = require('cors');
@@ -16,26 +17,31 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Add error handler for path-to-regexp at the very top
+process.on('uncaughtException', (err) => {
+  if (err.message.includes('path-to-regexp')) {
+    console.error('Path-to-regexp error:', err);
+    process.exit(1);
+  }
+});
+
 // Configuration constants
 const CONFIG = {
   JWT_EXPIRY: '24h',
   BCRYPT_ROUNDS: 12,
   FILE_SIZE_LIMIT: 5 * 1024 * 1024, // 5MB
   ALLOWED_FILE_TYPES: ['image/jpeg', 'image/png', 'application/pdf'],
-  UPLOAD_DIR: path.join(__dirname, 'tmp_uploads') // Render-compatible ephemeral storage
+  UPLOAD_DIR: path.join(__dirname, 'tmp_uploads')
 };
 
-// Database configuration for Render deployment
+// Database configuration
 const getDatabaseConfig = () => {
   if (process.env.INTERNAL_DATABASE_URL) {
-    // Production/Render configuration
     return {
       connectionString: process.env.INTERNAL_DATABASE_URL,
       ssl: { rejectUnauthorized: false }
     };
   }
-
-  // Local development configuration
   return {
     host: process.env.DB_HOST || 'localhost',
     port: process.env.DB_PORT || 5432,
@@ -48,10 +54,11 @@ const getDatabaseConfig = () => {
 
 const pool = new Pool(getDatabaseConfig());
 
+// ================== MIDDLEWARE SETUP ================== //
 // Security middleware
 app.use(helmet({
-  crossOriginEmbedderPolicy: false, // Needed for file uploads
-  contentSecurityPolicy: false // Adjust based on your frontend needs
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: false
 }));
 
 app.use(cors({
@@ -63,82 +70,33 @@ app.use(cors({
 
 // Rate limiting
 const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: { error: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false
 });
 
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // More lenient for production
+  windowMs: 15 * 60 * 1000,
+  max: 10,
   message: { error: 'Too many authentication attempts, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false
 });
 
-// Apply rate limiting
-app.use('/api/', generalLimiter);
-app.use(['/api/auth/login', '/api/auth/register'], authLimiter);
-
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-// Static file serving for ephemeral uploads
+
+// Static files
+app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(CONFIG.UPLOAD_DIR));
 
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Render-required health check endpoint (must be at root level)
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    service: 'task-manager-api'
-  });
-});
-
-// Add this root route handler before your 404 handler
-app.get('/', (req, res) => {
-  // Check if the request wants HTML (frontend)
-  if (req.accepts('html')) {
-    return res.sendFile(path.join(__dirname, 'public', 'index.html'));
-  }
-  // Otherwise return API docs (for API clients)
-  res.json({
-    name: 'Task Manager API',
-    version: '1.0.0',
-    status: 'running',
-    message: 'Welcome to the Task Manager API',
-    endpoints: {
-      health: '/health',
-      api_health: '/api/health',
-      authentication: {
-        login: '/api/auth/login',
-        register: '/api/auth/register'
-      },
-      tasks: {
-        list: 'GET /api/tasks',
-        create: 'POST /api/tasks',
-        get: 'GET /api/tasks/:id',
-        update: 'PUT /api/tasks/:id',
-        delete: 'DELETE /api/tasks/:id'
-      }
-    },
-    documentation: 'Use the endpoints above to interact with the API',
-    timestamp: new Date().toISOString()
-  });
-});
-
-
- 
-
-// File upload configuration optimized for Render's ephemeral storage
+// File upload configuration
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     try {
-      // Ensure upload directory exists (Render's ephemeral storage)
       await fs.access(CONFIG.UPLOAD_DIR);
     } catch {
       await fs.mkdir(CONFIG.UPLOAD_DIR, { recursive: true });
@@ -146,7 +104,6 @@ const storage = multer.diskStorage({
     cb(null, CONFIG.UPLOAD_DIR);
   },
   filename: (req, file, cb) => {
-    // Create unique filename with original extension
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
     const sanitizedOriginalName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '');
     const extension = path.extname(sanitizedOriginalName);
@@ -158,7 +115,7 @@ const upload = multer({
   storage,
   limits: {
     fileSize: CONFIG.FILE_SIZE_LIMIT,
-    files: 1 // Only allow single file upload
+    files: 1
   },
   fileFilter: (req, file, cb) => {
     if (CONFIG.ALLOWED_FILE_TYPES.includes(file.mimetype)) {
@@ -169,36 +126,30 @@ const upload = multer({
   }
 });
 
-// Database initialization with better error handling
+// ================== HELPER FUNCTIONS ================== //
+// Database initialization
 const initializeDatabase = async () => {
   const maxRetries = 5;
   let retries = 0;
 
   while (retries < maxRetries) {
     try {
-      // Test connection with timeout
       const client = await pool.connect();
       await client.query('SELECT NOW()');
       client.release();
-
       console.log('✅ Connected to PostgreSQL database');
       break;
     } catch (error) {
       retries++;
       console.log(`🔄 Database connection attempt ${retries}/${maxRetries} failed:`, error.message);
-
       if (retries === maxRetries) {
-        console.error('❌ Failed to connect to database after maximum retries');
-        process.exit(1);
+        throw new Error('❌ Failed to connect to database after maximum retries');
       }
-
-      // Wait before retry
       await new Promise(resolve => setTimeout(resolve, 2000 * retries));
     }
   }
 
   try {
-    // Create users table with improved schema
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -210,7 +161,6 @@ const initializeDatabase = async () => {
       )
     `);
 
-    // Create tasks table with improved schema
     await pool.query(`
       CREATE TABLE IF NOT EXISTS tasks (
         id SERIAL PRIMARY KEY,
@@ -227,63 +177,24 @@ const initializeDatabase = async () => {
       )
     `);
 
-    // Create indexes for better performance
-    await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
-      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-      CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
-      CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);
-    `);
-
-    // Create function to auto-update updated_at timestamp
-    await pool.query(`
-      CREATE OR REPLACE FUNCTION update_updated_at_column()
-      RETURNS TRIGGER AS $$
-      BEGIN
-        NEW.updated_at = CURRENT_TIMESTAMP;
-        RETURN NEW;
-      END;
-      $$ language 'plpgsql';
-    `);
-
-    // Create triggers for auto-updating updated_at
-    await pool.query(`
-      DROP TRIGGER IF EXISTS update_users_updated_at ON users;
-      CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-      FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-      DROP TRIGGER IF EXISTS update_tasks_updated_at ON tasks;
-      CREATE TRIGGER update_tasks_updated_at BEFORE UPDATE ON tasks
-      FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-    `);
-
-    console.log('✅ Database tables and indexes initialized');
+    console.log('✅ Database tables initialized');
   } catch (error) {
     console.error('❌ Database schema initialization error:', error);
-    process.exit(1);
+    throw error;
   }
 };
 
-// Enhanced authentication middleware
+// Authentication middleware
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    return res.status(401).json({
-      error: 'Access token required',
-      code: 'TOKEN_MISSING'
-    });
+    return res.status(401).json({ error: 'Access token required' });
   }
 
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, user) => {
-    if (err) {
-      const errorCode = err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID';
-      return res.status(403).json({
-        error: 'Invalid or expired token',
-        code: errorCode
-      });
-    }
+    if (err) return res.status(403).json({ error: 'Invalid or expired token' });
     req.user = user;
     next();
   });
@@ -291,650 +202,240 @@ const authenticateToken = (req, res, next) => {
 
 // Validation middleware
 const validateRequired = (fields) => (req, res, next) => {
-  const missing = fields.filter(field => {
-    const value = req.body[field];
-    return value === undefined || value === null || value === '';
-  });
-
-  if (missing.length > 0) {
+  const missing = fields.filter(field => !req.body[field]);
+  if (missing.length) {
     return res.status(400).json({
-      error: `Missing required fields: ${missing.join(', ')}`,
-      code: 'VALIDATION_ERROR',
-      missing_fields: missing
+      error: `Missing required fields: ${missing.join(', ')}`
     });
   }
   next();
 };
 
-// Enhanced validation functions
-const validateEmail = (email) => {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email) && email.length <= 255;
-};
-
-const validatePassword = (password) => {
-  return password && password.length >= 6 && password.length <= 128;
-};
-
-const validateUsername = (username) => {
-  const usernameRegex = /^[a-zA-Z0-9_-]+$/;
-  return username && username.length >= 3 && username.length <= 50 && usernameRegex.test(username);
-};
-
-// Enhanced error handling
-const handleDatabaseError = (error, res, customMessage = 'Database error') => {
-  console.error('Database error:', {
-    message: error.message,
-    code: error.code,
-    detail: error.detail,
-    stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+// ================== ROUTE INITIALIZATION ================== //
+const initRoutes = () => {
+  // Health check
+  app.get('/health', (req, res) => {
+    res.status(200).json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      service: 'task-manager-api'
+    });
   });
 
-  // Handle specific PostgreSQL error codes
-  switch (error.code) {
-    case '23505': // Unique violation
-      return res.status(409).json({
-        error: 'Resource already exists',
-        code: 'DUPLICATE_ENTRY'
-      });
-    case '23503': // Foreign key violation
-      return res.status(400).json({
-        error: 'Invalid reference',
-        code: 'INVALID_REFERENCE'
-      });
-    case '22001': // String data too long
-      return res.status(400).json({
-        error: 'Data too long for field',
-        code: 'DATA_TOO_LONG'
-      });
-    case '23514': // Check constraint violation
-      return res.status(400).json({
-        error: 'Invalid data value',
-        code: 'CONSTRAINT_VIOLATION'
-      });
-    default:
-      return res.status(500).json({
-        error: customMessage,
-        code: 'DATABASE_ERROR'
-      });
-  }
-};
+  // Serve frontend
+  app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  });
 
-// Safe file operations for ephemeral storage
-const safeDeleteFile = async (filePath) => {
-  try {
-    await fs.access(filePath);
-    await fs.unlink(filePath);
-    console.log(`🗑️ Deleted file: ${filePath}`);
-  } catch (error) {
-    console.warn(`⚠️ Failed to delete file ${filePath}:`, error.message);
-  }
-};
+  // API routes using Router
+  const apiRouter = express.Router();
+  
+  // Apply rate limiting
+  apiRouter.use(generalLimiter);
+  apiRouter.use(['/auth/login', '/auth/register'], authLimiter);
 
-// Authentication routes
-app.post('/api/auth/register',
-  validateRequired(['username', 'email', 'password']),
-  async (req, res) => {
+  // API documentation
+  apiRouter.get('/', (req, res) => {
+    res.json({
+      name: 'Task Manager API',
+      version: '1.0.0',
+      status: 'running',
+      message: 'Welcome to the Task Manager API',
+      endpoints: {
+        health: '/health',
+        api_health: '/api/health',
+        authentication: {
+          login: '/api/auth/login',
+          register: '/api/auth/register'
+        },
+        tasks: {
+          list: 'GET /api/tasks',
+          create: 'POST /api/tasks',
+          get: 'GET /api/tasks/:id',
+          update: 'PUT /api/tasks/:id',
+          delete: 'DELETE /api/tasks/:id'
+        }
+      },
+      documentation: 'Use the endpoints above to interact with the API',
+      timestamp: new Date().toISOString()
+    });
+  });
+
+  // Authentication routes
+  apiRouter.post('/auth/register', validateRequired(['username', 'email', 'password']), async (req, res) => {
     try {
       const { username, email, password } = req.body;
-
-      // Enhanced input validation
-      if (!validateUsername(username)) {
-        return res.status(400).json({
-          error: 'Username must be 3-50 characters and contain only letters, numbers, hyphens, and underscores',
-          code: 'INVALID_USERNAME'
-        });
-      }
-
-      if (!validateEmail(email)) {
-        return res.status(400).json({
-          error: 'Invalid email format',
-          code: 'INVALID_EMAIL'
-        });
-      }
-
-      if (!validatePassword(password)) {
-        return res.status(400).json({
-          error: 'Password must be 6-128 characters long',
-          code: 'INVALID_PASSWORD'
-        });
-      }
-
-      // Check if user exists
-      const existingUser = await pool.query(
-        'SELECT id FROM users WHERE username = $1 OR email = $2',
-        [username.toLowerCase(), email.toLowerCase()]
-      );
-
-      if (existingUser.rows.length > 0) {
-        return res.status(409).json({
-          error: 'Username or email already exists',
-          code: 'USER_EXISTS'
-        });
-      }
-
-      // Hash password and create user
       const passwordHash = await bcrypt.hash(password, CONFIG.BCRYPT_ROUNDS);
-
       const result = await pool.query(
         `INSERT INTO users (username, email, password_hash)
-          VALUES ($1, $2, $3)
-          RETURNING id, username, email, created_at`,
+         VALUES ($1, $2, $3)
+         RETURNING id, username, email, created_at`,
         [username.toLowerCase(), email.toLowerCase(), passwordHash]
       );
-
       const user = result.rows[0];
       const accessToken = jwt.sign(
         { id: user.id, username: user.username },
         process.env.ACCESS_TOKEN_SECRET,
         { expiresIn: CONFIG.JWT_EXPIRY }
       );
-
-      res.status(201).json({
-        success: true,
-        accessToken,
-        user: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          created_at: user.created_at
-        }
-      });
+      res.status(201).json({ success: true, accessToken, user });
     } catch (error) {
-      handleDatabaseError(error, res, 'Registration failed');
+      console.error('Registration error:', error);
+      res.status(500).json({ error: 'Registration failed' });
     }
-  }
-);
+  });
 
-app.post('/api/auth/login',
-  validateRequired(['username', 'password']),
-  async (req, res) => {
+  apiRouter.post('/auth/login', validateRequired(['username', 'password']), async (req, res) => {
     try {
       const { username, password } = req.body;
-
-      // Find user (case-insensitive)
       const result = await pool.query(
         'SELECT * FROM users WHERE LOWER(username) = LOWER($1)',
         [username]
       );
-
       if (result.rows.length === 0) {
-        return res.status(401).json({
-          error: 'Invalid credentials',
-          code: 'INVALID_CREDENTIALS'
-        });
+        return res.status(401).json({ error: 'Invalid credentials' });
       }
-
       const user = result.rows[0];
       const validPassword = await bcrypt.compare(password, user.password_hash);
-
       if (!validPassword) {
-        return res.status(401).json({
-          error: 'Invalid credentials',
-          code: 'INVALID_CREDENTIALS'
-        });
+        return res.status(401).json({ error: 'Invalid credentials' });
       }
-
-      // Generate JWT
       const accessToken = jwt.sign(
         { id: user.id, username: user.username },
         process.env.ACCESS_TOKEN_SECRET,
         { expiresIn: CONFIG.JWT_EXPIRY }
       );
-
-      res.json({
-        success: true,
-        accessToken,
-        user: {
-          id: user.id,
-          username: user.username,
-          email: user.email
-        }
-      });
+      res.json({ success: true, accessToken, user });
     } catch (error) {
-      handleDatabaseError(error, res, 'Login failed');
+      console.error('Login error:', error);
+      res.status(500).json({ error: 'Login failed' });
     }
-  }
-);
+  });
 
-// Enhanced task routes
-app.get('/api/tasks', authenticateToken, async (req, res) => {
-  try {
-    const {
-      status,
-      priority,
-      page = 1,
-      limit = 10,
-      sort = 'created_at',
-      order = 'DESC',
-      search
-    } = req.query;
-
-    let query = 'SELECT * FROM tasks WHERE user_id = $1';
-    const params = [req.user.id];
-    let paramIndex = 2;
-
-    // Add search functionality
-    if (search) {
-      query += ` AND (title ILIKE $${paramIndex} OR description ILIKE $${paramIndex})`;
-      params.push(`%${search}%`);
-      paramIndex++;
+  // Task routes
+  apiRouter.get('/tasks', authenticateToken, async (req, res) => {
+    try {
+      const result = await pool.query(
+        'SELECT * FROM tasks WHERE user_id = $1',
+        [req.user.id]
+      );
+      res.json({ success: true, tasks: result.rows });
+    } catch (error) {
+      console.error('Failed to fetch tasks:', error);
+      res.status(500).json({ error: 'Failed to fetch tasks' });
     }
+  });
 
-    // Add filters
-    if (status && ['pending', 'in_progress', 'completed', 'cancelled'].includes(status)) {
-      query += ` AND status = $${paramIndex}`;
-      params.push(status);
-      paramIndex++;
-    }
-
-    if (priority && ['low', 'medium', 'high'].includes(priority)) {
-      query += ` AND priority = $${paramIndex}`;
-      params.push(priority);
-      paramIndex++;
-    }
-
-    // Add sorting
-    const validSortFields = ['created_at', 'updated_at', 'due_date', 'title', 'priority', 'status'];
-    const sortField = validSortFields.includes(sort) ? sort : 'created_at';
-    const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-
-    query += ` ORDER BY ${sortField} ${sortOrder}`;
-
-    // Add pagination
-    const pageNum = Math.max(1, parseInt(page));
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit))); // Cap at 100
-    const offset = (pageNum - 1) * limitNum;
-
-    query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
-    params.push(limitNum, offset);
-
-    const result = await pool.query(query, params);
-
-    // Get total count for pagination
-    let countQuery = 'SELECT COUNT(*) FROM tasks WHERE user_id = $1';
-    const countParams = [req.user.id];
-
-    if (search) {
-      countQuery += ' AND (title ILIKE $2 OR description ILIKE $2)';
-      countParams.push(`%${search}%`);
-    }
-
-    const countResult = await pool.query(countQuery, countParams);
-    const total = parseInt(countResult.rows[0].count);
-
-    res.json({
-      success: true,
-      tasks: result.rows,
-      pagination: {
-        total,
-        page: pageNum,
-        limit: limitNum,
-        pages: Math.ceil(total / limitNum),
-        hasNext: pageNum * limitNum < total,
-        hasPrev: pageNum > 1
-      }
-    });
-  } catch (error) {
-    handleDatabaseError(error, res, 'Failed to fetch tasks');
-  }
-});
-
-app.post('/api/tasks',
-  authenticateToken,
-  upload.single('attachment'),
-  validateRequired(['title']),
-  async (req, res) => {
+  // Updated task creation route with proper validation
+  apiRouter.post('/tasks', authenticateToken, upload.single('attachment'), validateRequired(['title']), async (req, res) => {
     try {
       const { title, description, status = 'pending', priority = 'medium', due_date } = req.body;
-      const attachment_path = req.file ? req.file.path : null;
-      const attachment_filename = req.file ? req.file.originalname : null;
-
-      // Validate inputs
-      if (title.length > 255) {
-        return res.status(400).json({
-          error: 'Title must not exceed 255 characters',
-          code: 'TITLE_TOO_LONG'
-        });
-      }
-
-      if (!['pending', 'in_progress', 'completed', 'cancelled'].includes(status)) {
-        return res.status(400).json({
-          error: 'Invalid status. Must be: pending, in_progress, completed, or cancelled',
+      
+      // Validate status against allowed values
+      const allowedStatuses = ['pending', 'in_progress', 'completed', 'cancelled'];
+      if (status && !allowedStatuses.includes(status)) {
+        return res.status(400).json({ 
+          error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}`,
           code: 'INVALID_STATUS'
         });
       }
 
-      if (!['low', 'medium', 'high'].includes(priority)) {
-        return res.status(400).json({
-          error: 'Invalid priority. Must be: low, medium, or high',
+      // Validate priority against allowed values
+      const allowedPriorities = ['low', 'medium', 'high'];
+      if (priority && !allowedPriorities.includes(priority)) {
+        return res.status(400).json({ 
+          error: `Invalid priority. Must be one of: ${allowedPriorities.join(', ')}`,
           code: 'INVALID_PRIORITY'
         });
+      }
+
+      // Handle file upload validation
+      if (req.file) {
+        if (!CONFIG.ALLOWED_FILE_TYPES.includes(req.file.mimetype)) {
+          await fs.unlink(req.file.path); // Clean up the uploaded file
+          return res.status(400).json({
+            error: 'Invalid file type. Only JPEG, PNG, and PDF files are allowed.',
+            code: 'INVALID_FILE_TYPE'
+          });
+        }
       }
 
       const result = await pool.query(
         `INSERT INTO tasks (title, description, status, priority, attachment_path, attachment_filename, due_date, user_id)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          RETURNING *`,
-        [title.trim(), description?.trim(), status, priority, attachment_path, attachment_filename, due_date, req.user.id]
-      );
-
-      res.status(201).json({
-        success: true,
-        task: result.rows[0]
-      });
-    } catch (error) {
-      handleDatabaseError(error, res, 'Failed to create task');
-    }
-  }
-);
-
-app.get('/api/tasks/:id', authenticateToken, async (req, res) => {
-  try {
-    const taskId = parseInt(req.params.id);
-
-    if (isNaN(taskId) || taskId <= 0) {
-      return res.status(400).json({
-        error: 'Invalid task ID',
-        code: 'INVALID_TASK_ID'
-      });
-    }
-
-    const result = await pool.query(
-      'SELECT * FROM tasks WHERE id = $1 AND user_id = $2',
-      [taskId, req.user.id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        error: 'Task not found',
-        code: 'TASK_NOT_FOUND'
-      });
-    }
-
-    res.json({
-      success: true,
-      task: result.rows[0]
-    });
-  } catch (error) {
-    handleDatabaseError(error, res, 'Failed to fetch task');
-  }
-});
-
-app.put('/api/tasks/:id',
-  authenticateToken,
-  upload.single('attachment'),
-  async (req, res) => {
-    try {
-      const taskId = parseInt(req.params.id);
-
-      if (isNaN(taskId) || taskId <= 0) {
-        return res.status(400).json({
-          error: 'Invalid task ID',
-          code: 'INVALID_TASK_ID'
-        });
-      }
-
-      // Get existing task
-      const existingTask = await pool.query(
-        'SELECT * FROM tasks WHERE id = $1 AND user_id = $2',
-        [taskId, req.user.id]
-      );
-
-      if (existingTask.rows.length === 0) {
-        return res.status(404).json({
-          error: 'Task not found',
-          code: 'TASK_NOT_FOUND'
-        });
-      }
-
-      const task = existingTask.rows[0];
-      const { title, description, status, priority, due_date } = req.body;
-
-      // Validate inputs if provided
-      if (title !== undefined && (typeof title !== 'string' || title.length === 0 || title.length > 255)) {
-        return res.status(400).json({
-          error: 'Title must be a non-empty string with max 255 characters',
-          code: 'INVALID_TITLE'
-        });
-      }
-
-      if (status && !['pending', 'in_progress', 'completed', 'cancelled'].includes(status)) {
-        return res.status(400).json({
-          error: 'Invalid status',
-          code: 'INVALID_STATUS'
-        });
-      }
-
-      if (priority && !['low', 'medium', 'high'].includes(priority)) {
-        return res.status(400).json({
-          error: 'Invalid priority',
-          code: 'INVALID_PRIORITY'
-        });
-      }
-
-      // Handle file upload
-      let attachment_path = task.attachment_path;
-      let attachment_filename = task.attachment_filename;
-
-      if (req.file) {
-        // Delete old file if exists
-        if (task.attachment_path) {
-          await safeDeleteFile(task.attachment_path);
-        }
-        attachment_path = req.file.path;
-        attachment_filename = req.file.originalname;
-      }
-
-      // Update task
-      const result = await pool.query(
-        `UPDATE tasks
-          SET title = COALESCE($1, title),
-              description = COALESCE($2, description),
-              status = COALESCE($3, status),
-              priority = COALESCE($4, priority),
-              attachment_path = COALESCE($5, attachment_path),
-              attachment_filename = COALESCE($6, attachment_filename),
-              due_date = COALESCE($7, due_date)
-          WHERE id = $8 AND user_id = $9
-          RETURNING *`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *`,
         [
-          title?.trim(),
+          title.trim(),
           description?.trim(),
           status,
           priority,
-          attachment_path,
-          attachment_filename,
+          req.file?.path,
+          req.file?.originalname,
           due_date,
-          taskId,
           req.user.id
         ]
       );
-
-      res.json({
-        success: true,
-        task: result.rows[0]
+      
+      res.status(201).json({ 
+        success: true, 
+        task: result.rows[0] 
       });
     } catch (error) {
-      handleDatabaseError(error, res, 'Failed to update task');
-    }
-  }
-);
+      console.error('Failed to create task:', error);
+      
+      // Clean up uploaded file if error occurred
+      if (req.file) {
+        try {
+          await fs.unlink(req.file.path);
+        } catch (cleanupError) {
+          console.error('Failed to clean up uploaded file:', cleanupError);
+        }
+      }
 
-app.delete('/api/tasks/:id', authenticateToken, async (req, res) => {
-  try {
-    const taskId = parseInt(req.params.id);
+      if (error.code === '23514' && error.constraint === 'tasks_status_check') {
+        return res.status(400).json({
+          error: 'Invalid task status. Allowed values: pending, in_progress, completed, cancelled',
+          code: 'INVALID_STATUS_VALUE'
+        });
+      }
 
-    if (isNaN(taskId) || taskId <= 0) {
-      return res.status(400).json({
-        error: 'Invalid task ID',
-        code: 'INVALID_TASK_ID'
+      res.status(500).json({ 
+        error: 'Failed to create task',
+        code: 'TASK_CREATION_FAILED'
       });
     }
+  });
 
-    // Get task to handle attachment cleanup
-    const taskResult = await pool.query(
-      'SELECT attachment_path FROM tasks WHERE id = $1 AND user_id = $2',
-      [taskId, req.user.id]
-    );
+  // Mount API router
+  app.use('/api', apiRouter);
 
-    if (taskResult.rows.length === 0) {
-      return res.status(404).json({
-        error: 'Task not found',
-        code: 'TASK_NOT_FOUND'
-      });
+  // SPA fallback
+  app.get('*', (req, res) => {
+    if (req.accepts('html')) {
+      return res.sendFile(path.join(__dirname, 'public', 'index.html'));
     }
-
-    const task = taskResult.rows[0];
-
-    // Delete attachment if exists
-    if (task.attachment_path) {
-      await safeDeleteFile(task.attachment_path);
-    }
-
-    // Delete task
-    await pool.query(
-      'DELETE FROM tasks WHERE id = $1 AND user_id = $2',
-      [taskId, req.user.id]
-    );
-
-    res.status(204).send();
-  } catch (error) {
-    handleDatabaseError(error, res, 'Failed to delete task');
-  }
-});
-
-// Enhanced API health check endpoint
-app.get('/api/health', async (req, res) => {
-  try {
-    // Test database connection
-    const dbStart = Date.now();
-    await pool.query('SELECT 1');
-    const dbTime = Date.now() - dbStart;
-
-    // Check upload directory
-    const uploadDirExists = fsSync.existsSync(CONFIG.UPLOAD_DIR);
-
-    res.json({
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      service: 'task-manager-api',
-      version: process.env.npm_package_version || '1.0.0',
-      environment: process.env.NODE_ENV || 'development',
-      database: {
-        status: 'connected',
-        responseTime: `${dbTime}ms`
-      },
-      storage: {
-        uploadDir: uploadDirExists ? 'available' : 'missing',
-        path: CONFIG.UPLOAD_DIR
-      },
-      uptime: process.uptime()
-    });
-  } catch (error) {
-    res.status(503).json({
-      status: 'unhealthy',
-      timestamp: new Date().toISOString(),
-      service: 'task-manager-api',
-      database: {
-        status: 'disconnected',
-        error: error.message
-      },
-      uptime: process.uptime()
-    });
-  }
-});
-app.get('*', (req, res) => {
-  if (req.accepts('html')) {
-    return res.sendFile(path.join(__dirname, 'public', 'index.html'));
-  }
-  res.status(404).json({
-    error: `Endpoint ${req.method} ${req.url} not found`,
-    code: 'ENDPOINT_NOT_FOUND'
+    res.status(404).json({ error: 'Not found' });
   });
-});
-
-// Global error handler
-app.use((error, req, res, next) => {
-  console.error('Unhandled error:', {
-    message: error.message,
-    stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-    url: req.url,
-    method: req.method,
-    timestamp: new Date().toISOString()
-  });
-
-  if (error instanceof multer.MulterError) {
-    switch (error.code) {
-      case 'LIMIT_FILE_SIZE':
-        return res.status(400).json({
-          error: 'File size too large. Maximum size is 5MB',
-          code: 'FILE_TOO_LARGE'
-        });
-      case 'LIMIT_FILE_COUNT':
-        return res.status(400).json({
-          error: 'Too many files. Only one file allowed',
-          code: 'TOO_MANY_FILES'
-        });
-      case 'LIMIT_UNEXPECTED_FILE':
-        return res.status(400).json({
-          error: 'Unexpected file field',
-          code: 'UNEXPECTED_FILE'
-        });
-      default:
-        return res.status(400).json({
-          error: 'File upload error',
-          code: 'UPLOAD_ERROR'
-        });
-    }
-  }
-
-  res.status(500).json({
-    error: 'Internal server error',
-    code: 'INTERNAL_ERROR'
-  });
-});
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    error: `Endpoint ${req.method} ${req.url} not found`,
-    code: 'ENDPOINT_NOT_FOUND'
-  });
-});
-
-// Graceful shutdown
-const gracefulShutdown = async (signal) => {
-  console.log(`\n🔄 Received ${signal}, shutting down gracefully...`);
-
-  try {
-    await pool.end();
-    console.log('✅ Database pool closed');
-    console.log('👋 Server shutdown complete');
-    process.exit(0);
-  } catch (error) {
-    console.error('❌ Error during shutdown:', error);
-    process.exit(1);
-  }
 };
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-// Initialize and start server with Render-compatible binding
+// ================== SERVER INITIALIZATION ================== //
 const startServer = async () => {
-  console.log('🚀 Starting Task Manager API...');
-  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🗄️ Upload Directory: ${CONFIG.UPLOAD_DIR}`);
+  try {
+    // Initialize database
+    await initializeDatabase();
+    
+    // Initialize routes
+    initRoutes();
 
-  await initializeDatabase(); // This calls your robust database initialization
-
-  // Render requires binding to 0.0.0.0
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
-    console.log(`🏥 Health check: http://0.0.0.0:${PORT}/health`);
-    console.log(`🔌 API health: http://0.0.0.0:${PORT}/api/health`);
-  });
+    // Start server
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
+      console.log(`🏥 Health check: http://0.0.0.0:${PORT}/health`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
 };
 
 startServer();
