@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     // DOM Elements
+    const API_BASE_URL = window.location.origin;
     const loginForm = document.getElementById('login');
     const registerForm = document.getElementById('register');
     const showRegister = document.getElementById('show-register');
@@ -65,7 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const password = document.getElementById('login-password').value;
 
         try {
-            const response = await fetch('/api/auth/login', {
+            const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -96,7 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const password = document.getElementById('register-password').value;
 
         try {
-            const response = await fetch('/api/auth/register', {
+            const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -148,14 +149,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!token) return;
 
         try {
-            const response = await fetch('/api/tasks', {
+            const response = await fetch(`${API_BASE_URL}/api/tasks`, {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
             });
 
             if (response.ok) {
-                tasks = await response.json();
+                const data = await response.json();
+                tasks = data.tasks || [];
                 renderTasks();
             } else {
                 console.error('Failed to fetch tasks');
@@ -180,7 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let attachmentHtml = '';
             if (task.attachment_path) {
                 const fileName = task.attachment_path.split('/').pop();
-                attachmentHtml = `<p><strong>Attachment:</strong> <a href="/${task.attachment_path}" target="_blank">${fileName}</a></p>`;
+                attachmentHtml = `<p><strong>Attachment:</strong> <a href="${API_BASE_URL}/${task.attachment_path}" target="_blank">${fileName}</a></p>`;
             }
 
             let dueDateHtml = '';
@@ -291,7 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let response;
             if (currentTaskId) {
                 // Update existing task
-                response = await fetch(`/api/tasks/${currentTaskId}`, {
+                response = await fetch(`${API_BASE_URL}/api/tasks/${currentTaskId}`, {
                     method: 'PUT',
                     headers: {
                         'Authorization': `Bearer ${token}`
@@ -300,7 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             } else {
                 // Create new task
-                response = await fetch('/api/tasks', {
+                response = await fetch(`${API_BASE_URL}/api/tasks`, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${token}`
@@ -336,7 +338,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!token) return;
 
         try {
-            const response = await fetch(`/api/tasks/${taskId}`, {
+            const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${token}`
