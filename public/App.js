@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
     // DOM Elements
-    const API_BASE_URL = window.location.origin;
+   const API_BASE_URL = window.location.origin.includes('localhost') 
+  ? 'http://localhost:3000' 
+  : 'https://crude-app-backend-dz4l.onrender.com';
     const loginForm = document.getElementById('login');
     const registerForm = document.getElementById('register');
     const showRegister = document.getElementById('show-register');
@@ -167,62 +169,73 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderTasks() {
-        tasksList.innerHTML = '';
+   function renderTasks() {
+    tasksList.innerHTML = '';
+    
+    if (!tasks || tasks.length === 0) {
+        tasksList.innerHTML = '<p class="no-tasks">No tasks found. Add your first task!</p>';
+        return;
+    }
+
+    // Create a document fragment for better performance
+    const fragment = document.createDocumentFragment();
+
+    tasks.forEach(task => {
+        const taskCard = document.createElement('div');
+        taskCard.className = 'task-card';
+        taskCard.dataset.taskId = task.id;  // Add task ID as data attribute
         
-        if (tasks.length === 0) {
-            tasksList.innerHTML = '<p>No tasks found. Add your first task!</p>';
-            return;
+        // Format due date if it exists
+        let dueDateHtml = '';
+        if (task.due_date) {
+            const dueDate = new Date(task.due_date);
+            dueDateHtml = `<p><strong>Due:</strong> ${dueDate.toLocaleString()}</p>`;
         }
 
-        tasks.forEach(task => {
-            const taskCard = document.createElement('div');
-            taskCard.className = 'task-card';
-            
-            let attachmentHtml = '';
-            if (task.attachment_path) {
-                const fileName = task.attachment_path.split('/').pop();
-                attachmentHtml = `<p><strong>Attachment:</strong> <a href="${API_BASE_URL}/${task.attachment_path}" target="_blank">${fileName}</a></p>`;
-            }
-
-            let dueDateHtml = '';
-            if (task.due_date) {
-                const dueDate = new Date(task.due_date);
-                dueDateHtml = `<p><strong>Due:</strong> ${dueDate.toLocaleString()}</p>`;
-            }
-
-            taskCard.innerHTML = `
-                <h3>${task.title}</h3>
-                <span class="task-status ${task.status.replace(' ', '-')}">${task.status}</span>
-                <p>${task.description || 'No description'}</p>
-                ${dueDateHtml}
-                ${attachmentHtml}
-                <div class="task-actions">
-                    <button class="edit-task" data-id="${task.id}">Edit</button>
-                    <button class="delete-task" data-id="${task.id}">Delete</button>
-                </div>
+        // Handle attachment if it exists
+        let attachmentHtml = '';
+        if (task.attachment_path) {
+            const fileName = task.attachment_path.split('/').pop();
+            attachmentHtml = `
+                <p><strong>Attachment:</strong> 
+                <a href="${API_BASE_URL}/uploads/${fileName}" target="_blank">${fileName}</a></p>
             `;
+        }
 
-            tasksList.appendChild(taskCard);
-        });
+        taskCard.innerHTML = `
+            <h3>${task.title}</h3>
+            <span class="task-status ${task.status.replace(' ', '-')}">${task.status}</span>
+            <p>${task.description || 'No description'}</p>
+            ${dueDateHtml}
+            ${attachmentHtml}
+            <div class="task-actions">
+                <button class="edit-task" data-id="${task.id}">Edit</button>
+                <button class="delete-task" data-id="${task.id}">Delete</button>
+            </div>
+        `;
 
-        // Add event listeners to action buttons
-        document.querySelectorAll('.edit-task').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const taskId = e.target.getAttribute('data-id');
-                openTaskModal(taskId);
-            });
-        });
+        fragment.appendChild(taskCard);
+    });
 
-        document.querySelectorAll('.delete-task').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const taskId = e.target.getAttribute('data-id');
-                if (confirm('Are you sure you want to delete this task?')) {
-                    deleteTask(taskId);
-                }
-            });
+    tasksList.appendChild(fragment);
+
+    // Add event listeners to all action buttons
+    document.querySelectorAll('.edit-task').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const taskId = e.target.getAttribute('data-id');
+            openTaskModal(taskId);
         });
-    }
+    });
+
+    document.querySelectorAll('.delete-task').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const taskId = e.target.getAttribute('data-id');
+            if (confirm('Are you sure you want to delete this task?')) {
+                deleteTask(taskId);
+            }
+        });
+    });
+}
 
     function openTaskModal(taskId = null) {
         currentTaskId = taskId;
@@ -333,27 +346,46 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function deleteTask(taskId) {
-        const token = localStorage.getItem('token');
-        if (!token) return;
-
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}`, {
-                method: 'DELETE',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-
-            if (response.ok) {
-                fetchTasks();
-            } else {
-                console.error('Failed to delete task');
-            }
-        } catch (err) {
-            console.error('Error deleting task:', err);
-        }
+ async function deleteTask(taskId) {
+    const token = localStorage.getItem('token');
+    if (!token) {
+        alert('Please login first');
+        return false;
     }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+        });
+
+        console.log('Delete response:', response); // Debug log
+        
+        if (response.status === 204) {
+            tasks = tasks.filter(task => task.id !== taskId);
+            renderTasks();
+            return true;
+        }
+        
+        if (response.ok) {
+            tasks = tasks.filter(task => task.id !== taskId);
+            renderTasks();
+            return true;
+        }
+        
+        // Handle specific error cases
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to delete task');
+    } catch (err) {
+        console.error('Delete error:', err);
+        alert(`Delete failed: ${err.message}`);
+        return false;
+    }
+}
 
     // Check for existing token on page load
     function checkAuth() {

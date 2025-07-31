@@ -92,7 +92,35 @@ button:hover {
     padding: 1.5rem;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     border: 1px solid var(--light-gray);
-    transition: all 0.2s ease;
+    transition: all 0.3s ease;
+    opacity: 1;
+}
+.task-card.deleting {
+    opacity: 0.5;
+    background-color: #ffeeee;
+    transform: scale(0.98);
+}
+
+.task-card.removed {
+    transform: scale(0.9);
+    opacity: 0;
+    height: 0;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+    transition: all 0.3s ease, height 0.3s 0.3s, padding 0.3s 0.3s, margin 0.3s 0.3s;
+}
+
+.no-tasks {
+    text-align: center;
+    padding: 20px;
+    color: #666;
+    font-style: italic;
+}
+
+button.delete-task:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
 }
 
 .task-card:hover {
