@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
      "start": "node -r dotenv/config server.js",
+     "build": "echo 'Building application' && npm install",
   "dev": "nodemon -r dotenv/config server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

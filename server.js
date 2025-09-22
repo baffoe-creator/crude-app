@@ -33,6 +33,12 @@ const CONFIG = {
 };
 
 const getDatabaseConfig = () => {
+   if (process.env.DATABASE_URL) {
+    return {
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false }
+    };
+  }
   if (process.env.INTERNAL_DATABASE_URL) {
     return {
       connectionString: process.env.INTERNAL_DATABASE_URL,
@@ -45,7 +51,7 @@ const getDatabaseConfig = () => {
     database: process.env.DB_NAME || 'task_manager',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'your_local_password',
-    ssl: false
+    ssl:process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
   };
 };
 
@@ -56,7 +62,7 @@ app.use(helmet({
   contentSecurityPolicy: false
 }));
 const allowedOrigins = [
-  'https://crude-app-backend-dz4l.onrender.com', // Add your frontend Render URL here
+  'https://crude-app-backend-dz4l.onrender.com',
   'http://localhost:3000',
   'http://localhost:3001'
 ].filter(Boolean);
@@ -408,7 +414,6 @@ apiRouter.delete('/tasks/:id', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Invalid task ID' });
         }
 
-        // Verify task exists and belongs to user
         const taskResult = await pool.query(
             'SELECT id, attachment_path FROM tasks WHERE id = $1 AND user_id = $2',
             [taskId, req.user.id]
@@ -419,7 +424,6 @@ apiRouter.delete('/tasks/:id', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Task not found' });
         }
 
-        // Delete any associated attachment file
         const task = taskResult.rows[0];
         if (task.attachment_path) {
             try {
@@ -427,15 +431,12 @@ apiRouter.delete('/tasks/:id', authenticateToken, async (req, res) => {
                 console.log(`Deleted attachment file: ${task.attachment_path}`);
             } catch (fileError) {
                 console.error('Failed to delete attachment file:', fileError);
-                // Continue with task deletion even if file deletion fails
             }
         }
 
-        // Delete the task
         await pool.query('DELETE FROM tasks WHERE id = $1', [taskId]);
         console.log(`Successfully deleted task ${taskId}`);
 
-        // Respond with 204 No Content
         return res.status(204).end();
     } catch (error) {
         console.error('Delete task error:', error);
@@ -445,8 +446,8 @@ apiRouter.delete('/tasks/:id', authenticateToken, async (req, res) => {
         });
     }
 });
+
 const initRoutes = () => {
-    // Mount the API router with /api prefix
     app.use('/api', apiRouter);
 
     app.get('/health', (req, res) => {
@@ -470,6 +471,7 @@ const initRoutes = () => {
         res.status(404).json({ error: 'Not found' });
     });
 };
+
 const startServer = async () => {
   try {
     await initializeDatabase();
@@ -485,5 +487,5 @@ const startServer = async () => {
     process.exit(1);
   }
 };
-
+module.exports = app;
 startServer();
